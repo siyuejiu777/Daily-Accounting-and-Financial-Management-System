@@ -2,15 +2,26 @@
 import { ref } from 'vue'
 import { useRouter } from 'vue-router'
 import { apiLogin } from '@/api'
+import { ElMessage } from 'element-plus'
 
 const router = useRouter()
-const email = ref('')
+const username = ref('')
 const password = ref('')
 
 const handleLogin = async () => {
-  const res = await apiLogin({ email: email.value, password: password.value })
-  localStorage.setItem('token', res.token)
-  localStorage.setItem('user', JSON.stringify(res.user))
-  router.push('/dashboard')  // 登录成功跳转到仪表盘
+  try {
+    const res = await apiLogin(username.value, password.value)
+    if (res.data.code === 200) {
+      // 登录成功，存储用户名
+      localStorage.setItem('user', JSON.stringify({ name: res.data.data.username }))
+      localStorage.setItem('token', 'php-session') // 标记已登录（实际依靠Cookie）
+      ElMessage.success(res.data.msg)
+      router.push('/dashboard')
+    } else {
+      ElMessage.error(res.data.msg)
+    }
+  } catch (error) {
+    ElMessage.error('网络错误或服务器异常')
+  }
 }
 </script>
