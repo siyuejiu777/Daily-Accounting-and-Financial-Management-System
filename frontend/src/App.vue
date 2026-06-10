@@ -80,8 +80,9 @@ const toggleCollapse = () => {
   isCollapse.value = !isCollapse.value
 }
 
+// App.vue 中 handleLogout 修改为
 const handleLogout = () => {
-  localStorage.removeItem('token')
+  localStorage.removeItem('isLoggedIn')
   localStorage.removeItem('user')
   router.push('/login')
 }

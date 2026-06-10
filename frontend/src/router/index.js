@@ -49,7 +49,7 @@ const router = createRouter({
 
 // 简单的路由守卫：检查是否登录
 router.beforeEach((to, from, next) => {
-  const isLoggedIn = localStorage.getItem('token')
+  const isLoggedIn = localStorage.getItem('isLoggedIn')
   if (to.meta.requiresAuth && !isLoggedIn) {
     next('/login')
   } else {

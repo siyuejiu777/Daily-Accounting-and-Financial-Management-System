@@ -1,6 +1,30 @@
 <?php
-// 引入我们刚刚写好的数据库连接文件（相当于把 db.php 的代码复制到这里）
+// 跨域与预检处理
+// 允许跨域
+// 动态允许特定的 Origin
+$allowed_origin = 'http://localhost:5173'; // 或根据需要动态获取
+if (isset($_SERVER['HTTP_ORIGIN']) && $_SERVER['HTTP_ORIGIN'] === $allowed_origin) {
+    header('Access-Control-Allow-Origin: ' . $_SERVER['HTTP_ORIGIN']);
+    header('Access-Control-Allow-Credentials: true');
+}
+header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
+header('Content-Type: application/json; charset=utf-8');
+header('Access-Control-Allow-Credentials: true');
+
+// 处理浏览器预检请求（OPTIONS）
+if ($_SERVER['REQUEST_METHOD'] == 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
+
+// 引入数据库连接
 require_once 'db.php';
+
+if (!$conn) {
+    echo json_encode(["code" => 500, "msg" => "数据库连接失败：" . mysqli_connect_error()]);
+    exit;
+}
 
 // 1. 接收前端通过 POST 方式传过来的 JSON 数据
 $inputData = file_get_contents("php://input");
@@ -23,6 +47,10 @@ if (empty($username) || empty($password)) {
 // （使用普通查询，基础薄弱时这样写最直观）
 $check_sql = "SELECT user_id FROM users WHERE username = '$username'";
 $check_result = mysqli_query($conn, $check_sql);
+if (!$check_result) {
+    echo json_encode(["code" => 500, "msg" => "查询失败：" . mysqli_error($conn)]);
+    exit;
+}
 
 if (mysqli_num_rows($check_result) > 0) {
     // 如果查出来的行数 > 0，说明被别人注册过了 

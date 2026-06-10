@@ -1,8 +1,14 @@
 <?php
 // 1. 允许跨域（方便你前端队友本地调试页面时，能够顺利调用你的后端接口）
-header("Access-Control-Allow-Origin: *");
-header("Access-Control-Allow-Headers: Content-Type");
-header("Content-Type: application/json; charset=utf-8");
+$allowed_origin = 'http://localhost:5173'; // 或根据需要动态获取
+if (isset($_SERVER['HTTP_ORIGIN']) && $_SERVER['HTTP_ORIGIN'] === $allowed_origin) {
+    header('Access-Control-Allow-Origin: ' . $_SERVER['HTTP_ORIGIN']);
+    header('Access-Control-Allow-Credentials: true');
+}
+header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
+header('Content-Type: application/json; charset=utf-8');
+header('Access-Control-Allow-Credentials: true');
 
 // 2. 数据库连接的基本配置（对应你 phpStudy 的默认设置）
 $host = "127.0.0.1";     // 本地服务器地址 [cite: 164]
