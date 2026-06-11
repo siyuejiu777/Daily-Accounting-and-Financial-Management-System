@@ -3,7 +3,7 @@
 -- https://www.phpmyadmin.net/
 --
 -- 主机： localhost
--- 生成日期： 2026-06-03 16:13:55
+-- 生成日期： 2026-06-11 16:42:01
 -- 服务器版本： 5.7.26
 -- PHP 版本： 7.3.4
 
@@ -77,23 +77,13 @@ INSERT INTO `categories` (`category_id`, `category_name`, `type`) VALUES
 --
 
 CREATE TABLE `records` (
-  `record_id` int(11) NOT NULL COMMENT '账目唯一标识',
-  `user_id` int(11) NOT NULL COMMENT '关联的用户ID',
-  `category_id` int(11) NOT NULL COMMENT '关联的分类ID',
-  `amount` decimal(10,2) NOT NULL COMMENT '账目金额',
-  `type` enum('income','expense') NOT NULL COMMENT '收支类别',
-  `record_date` date NOT NULL COMMENT '记账日期',
-  `remark` varchar(255) DEFAULT NULL COMMENT '备注说明',
-  `created_at` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COMMENT='账目流水记录表';
-
---
--- 转存表中的数据 `records`
---
-
-INSERT INTO `records` (`record_id`, `user_id`, `category_id`, `amount`, `type`, `record_date`, `remark`, `created_at`) VALUES
-(1, 1, 1, '45.50', 'expense', '2026-06-01', '中午吃麻辣烫', '2026-06-01 13:51:36'),
-(2, 1, 1, '50.00', 'expense', '2026-06-01', '大额消费触发超支', '2026-06-01 13:56:23');
+  `user_id` int(11) NOT NULL COMMENT '用户ID',
+  `category_id` int(11) NOT NULL COMMENT '分类ID',
+  `record_time` datetime NOT NULL COMMENT '记账日期(精确到秒)',
+  `type` enum('income','expense') NOT NULL COMMENT '收支类型',
+  `amount` decimal(10,2) NOT NULL COMMENT '金额',
+  `note` varchar(255) DEFAULT NULL COMMENT '备注'
+) ENGINE=MyISAM DEFAULT CHARSET=utf8mb4;
 
 -- --------------------------------------------------------
 
@@ -136,9 +126,8 @@ ALTER TABLE `categories`
 -- 表的索引 `records`
 --
 ALTER TABLE `records`
-  ADD PRIMARY KEY (`record_id`),
-  ADD KEY `fk_records_user` (`user_id`),
-  ADD KEY `fk_records_category` (`category_id`);
+  ADD PRIMARY KEY (`user_id`,`category_id`,`record_time`),
+  ADD KEY `category_id` (`category_id`);
 
 --
 -- 表的索引 `users`
@@ -164,12 +153,6 @@ ALTER TABLE `categories`
   MODIFY `category_id` int(11) NOT NULL AUTO_INCREMENT COMMENT '分类唯一标识', AUTO_INCREMENT=11;
 
 --
--- 使用表AUTO_INCREMENT `records`
---
-ALTER TABLE `records`
-  MODIFY `record_id` int(11) NOT NULL AUTO_INCREMENT COMMENT '账目唯一标识', AUTO_INCREMENT=3;
-
---
 -- 使用表AUTO_INCREMENT `users`
 --
 ALTER TABLE `users`
@@ -184,13 +167,6 @@ ALTER TABLE `users`
 --
 ALTER TABLE `budgets`
   ADD CONSTRAINT `fk_budgets_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE;
-
---
--- 限制表 `records`
---
-ALTER TABLE `records`
-  ADD CONSTRAINT `fk_records_category` FOREIGN KEY (`category_id`) REFERENCES `categories` (`category_id`),
-  ADD CONSTRAINT `fk_records_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`user_id`) ON DELETE CASCADE;
 COMMIT;
 
 /*!40101 SET CHARACTER_SET_CLIENT=@OLD_CHARACTER_SET_CLIENT */;
