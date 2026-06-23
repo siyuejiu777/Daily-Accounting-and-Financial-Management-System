@@ -50,6 +50,7 @@ if (password_verify($password, $user['password'])) {
         "code" => 200,
         "msg" => "登录成功！",
         "data" => [
+            'user_id' => $user['user_id'],
             "username" => $user['username']
         ]
     ], JSON_UNESCAPED_UNICODE);
