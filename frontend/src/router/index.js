@@ -48,13 +48,13 @@ const router = createRouter({
 })
 
 // 简单的路由守卫：检查是否登录
-router.beforeEach((to, from, next) => {
+router.beforeEach((to, from) => {
   const isLoggedIn = localStorage.getItem('isLoggedIn')
   if (to.meta.requiresAuth && !isLoggedIn) {
-    next('/login')
-  } else {
-    next()
+    // 返回 '/login' 表示重定向到登录页
+    return '/login'
   }
+  // 不需要调用 next()，什么都不返回或者返回 true 即可放行
 })
 
 export default router

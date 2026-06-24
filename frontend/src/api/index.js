@@ -26,4 +26,25 @@ export const apiGetAnalysis = (month) => {
   return request.get('analysis.php', { params: { month } })
 }
 
+// 删除记录
+export const apiDeleteRecord = (data) => {
+  return request.post('record_delete.php', data)
+  // data: { category_id, record_time }
+}
+
 // 后续如果A给了获取分类、获取记录等接口，在这里继续添加
+
+export const apiGetCategories = () => {
+  return request.get('categories_list.php') // 如果A用的文件名不同，请对齐
+}
+
+// 新增分类
+export const apiAddCategory = (data) => {
+  return request.post('category_add.php', data)
+  // data: { category_name, type }
+}
+
+// 删除分类
+export const apiDeleteCategory = (categoryId) => {
+  return request.post('category_delete.php', { category_id: categoryId })
+}

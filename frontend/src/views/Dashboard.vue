@@ -24,7 +24,12 @@
     <el-card style="margin-top: 20px;">
       <template #header>快速记账</template>
       <el-input placeholder="搜索记账记录..." />
-      <el-button type="primary" style="margin-top: 10px;">添加新记录</el-button>
+      <el-button type="primary" style="margin-top: 10px;" @click="router.push('/record')">添加新记录</el-button>
     </el-card>
   </div>
 </template>
+
+<script setup>
+import { useRouter } from 'vue-router'
+const router = useRouter()
+</script>

@@ -53,31 +53,27 @@ const categories = ref([])
 
 const form = reactive({
   amount: null,
-  type: 'expense',      // 默认支出
+  type: 'expense',
   category_id: null,
-  record_time: '',       // 不填则后端自动填当前时间
-  note: '',
-  user_id: null          // 暂时需要传
+  record_time: '',   // 不填，后端会自动填当前时间
+  note: ''
+  // 不再需要 user_id
 })
 
-// 根据类型筛选分类（收入时只显示收入分类，支出时只显示支出分类）
+// 根据所选类型过滤分类
 const filteredCategories = computed(() => {
   return categories.value.filter(cat => cat.type === form.type)
 })
 
 onMounted(async () => {
-  // 获取 user_id（暂时从 localStorage 取，后续 A 改 Session 后删除这行）
-  const user = JSON.parse(localStorage.getItem('user') || '{}')
-  form.user_id = user.user_id || 1  // 如果 localStorage 没有，默认 1（测试用）
-
-  // 获取分类列表（如果接口还没好，先用 Mock）
+  // 获取分类列表
   try {
     const res = await apiGetCategories()
     if (res.data.code === 200) {
       categories.value = res.data.data
     }
   } catch (e) {
-    // Mock 数据兜底
+    // Mock 数据兜底（如果接口还没好）
     categories.value = [
       { category_id: 1, category_name: '餐饮美食', type: 'expense' },
       { category_id: 2, category_name: '交通出行', type: 'expense' },
@@ -94,16 +90,15 @@ const submitRecord = async () => {
   submitting.value = true
   try {
     const res = await apiAddRecord({
-      user_id: form.user_id,
       amount: form.amount,
       type: form.type,
       category_id: form.category_id,
       note: form.note,
-      record_time: form.record_time || undefined  // 空则后端自动生成
+      record_time: form.record_time || undefined  // 如果为空则传 undefined，后端会自动填
     })
     if (res.data.code === 200) {
       ElMessage.success('记账成功！')
-      router.push('/records')
+      router.push('/records')  // 跳转到记录列表页
     } else {
       ElMessage.error(res.data.msg)
     }
