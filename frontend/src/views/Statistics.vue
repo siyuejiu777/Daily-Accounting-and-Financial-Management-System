@@ -5,10 +5,18 @@
       <el-col :xs="24" :sm="12">
         <el-card>
           <template #header>支出分类占比</template>
-          <div ref="pieChart" style="height: 300px"></div>
+          <div ref="expensePieChart" style="height: 300px"></div>
         </el-card>
       </el-col>
       <el-col :xs="24" :sm="12">
+        <el-card>
+          <template #header>收入分类占比</template>
+          <div ref="incomePieChart" style="height: 300px"></div>
+        </el-card>
+      </el-col>
+    </el-row>
+    <el-row :gutter="20" style="margin-top: 20px">
+      <el-col :span="24">
         <el-card>
           <template #header>每日收支趋势</template>
           <div ref="lineChart" style="height: 300px"></div>
@@ -21,18 +29,49 @@
 <script setup>
 import { ref, onMounted } from 'vue'
 import * as echarts from 'echarts'
-import { apiGetAnalysis } from '@/api'
+import { apiGetAnalysis, apiGetCategories } from '@/api'
 
-const pieChart = ref(null)
+const expensePieChart = ref(null)
+const incomePieChart = ref(null)
 const lineChart = ref(null)
 
 onMounted(async () => {
   const month = new Date().toISOString().slice(0, 7)
+
   try {
-    const res = await apiGetAnalysis(month)
-    if (res.data.code === 200) {
-      const { category_expense_pie, daily_trend_line } = res.data.data
-      renderPieChart(category_expense_pie || [])
+    // 并发请求分析数据和分类列表
+    const [analysisRes, categoriesRes] = await Promise.all([
+      apiGetAnalysis(month),
+      apiGetCategories().catch(() => ({ data: { code: 200, data: [] } })) // 容错
+    ])
+
+    if (analysisRes.data.code === 200) {
+      const { category_expense_pie, daily_trend_line, record_list } = analysisRes.data.data
+
+      // 1. 渲染后端返回的支出分类饼图
+      renderPieChart(expensePieChart, category_expense_pie || [], '支出')
+
+      // 2. 根据 record_list 计算收入分类占比
+      const categories = categoriesRes.data.code === 200 ? categoriesRes.data.data : []
+      const categoryMap = {}
+      categories.forEach(cat => {
+        categoryMap[cat.category_id] = cat.category_name
+      })
+
+      const incomeMap = {}
+      if (record_list && record_list.length > 0) {
+        record_list.filter(r => r.type === 'income').forEach(r => {
+          const name = r.category_name || categoryMap[r.category_id] || '未分类'
+          incomeMap[name] = (incomeMap[name] || 0) + parseFloat(r.amount)
+        })
+      }
+      const incomePieData = Object.entries(incomeMap).map(([name, value]) => ({
+        category_name: name,
+        total_amount: value
+      }))
+      renderPieChart(incomePieChart, incomePieData, '收入')
+
+      // 3. 渲染每日收支趋势折线图
       renderLineChart(daily_trend_line || [])
     }
   } catch (error) {
@@ -40,23 +79,35 @@ onMounted(async () => {
   }
 })
 
-const renderPieChart = (data) => {
-  if (!pieChart.value) return
-  const chart = echarts.init(pieChart.value)
+// 通用饼图渲染函数
+const renderPieChart = (chartRef, data, type) => {
+  if (!chartRef.value) return
+  const chart = echarts.init(chartRef.value)
   chart.setOption({
     tooltip: { trigger: 'item' },
     legend: { orient: 'vertical', left: 'left' },
     series: [
       {
+        name: type + '分类',
         type: 'pie',
         radius: '50%',
-        data: data.map(item => ({ name: item.category_name, value: item.total_amount })),
-        emphasis: { itemStyle: { shadowBlur: 10, shadowOffsetX: 0, shadowColor: 'rgba(0, 0, 0, 0.5)' } }
+        data: data.map(item => ({
+          name: item.category_name,
+          value: item.total_amount
+        })),
+        emphasis: {
+          itemStyle: {
+            shadowBlur: 10,
+            shadowOffsetX: 0,
+            shadowColor: 'rgba(0, 0, 0, 0.5)'
+          }
+        }
       }
     ]
   })
 }
 
+// 折线图渲染函数
 const renderLineChart = (data) => {
   if (!lineChart.value) return
   const chart = echarts.init(lineChart.value)
