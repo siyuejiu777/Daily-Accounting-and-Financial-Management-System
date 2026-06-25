@@ -27,11 +27,11 @@
 
     <el-card style="margin-top: 20px;">
       <template #header>快速记账</template>
-      <el-input v-model="searchKeyword" placeholder="搜索记账记录..." @keyup.enter="searchRecords">
-        <template #append>
-          <el-button @click="searchRecords">搜索</el-button>
-        </template>
-      </el-input>
+      <el-input
+        v-model="searchKeyword"
+        placeholder="搜索记账记录..."
+        @keyup.enter="handleSearch"
+      />
       <el-button type="primary" style="margin-top: 10px;" @click="router.push('/record')">添加新记录</el-button>
     </el-card>
 
@@ -66,36 +66,29 @@ const remainingBudget = ref(0)
 const isOverBudget = ref(false)
 const searchKeyword = ref('')
 
-// 预算弹窗相关
 const showBudgetDialog = ref(false)
 const budgetSubmitting = ref(false)
 const budgetForm = reactive({
-  month: new Date().toISOString().slice(0, 7), // 当月
+  month: new Date().toISOString().slice(0, 7),
   amount: 0
 })
 
-// 计算当月总支出（从 daily_trend_line 累加）
 const calcTotalExpense = (trendData) => {
   return trendData.reduce((sum, day) => sum + (day.expense || 0), 0)
 }
 
-// 加载仪表盘数据
 const loadDashboard = async () => {
   try {
     const month = new Date().toISOString().slice(0, 7)
     const res = await apiGetAnalysis(month)
     if (res.data.code === 200) {
       const { daily_trend_line } = res.data.data
-
-      // 提取今日收支
       const todayStr = new Date().toISOString().slice(0, 10)
       const todayData = daily_trend_line.find(item => item.date === todayStr)
       if (todayData) {
         todayIncome.value = todayData.income || 0
         todayExpense.value = todayData.expense || 0
       }
-
-      // 计算当月总支出和预算剩余
       const totalExpense = calcTotalExpense(daily_trend_line)
       const savedBudget = parseFloat(localStorage.getItem(`budget_${month}`) || '0')
       if (savedBudget > 0) {
@@ -112,7 +105,6 @@ const loadDashboard = async () => {
   }
 }
 
-// 提交预算
 const submitBudget = async () => {
   if (budgetForm.amount <= 0) {
     ElMessage.warning('预算额度必须大于0')
@@ -123,10 +115,8 @@ const submitBudget = async () => {
     const res = await apiSetBudget(budgetForm.month, budgetForm.amount)
     if (res.data.code === 200) {
       ElMessage.success(res.data.msg)
-      // 存入 localStorage 作为缓存
       localStorage.setItem(`budget_${budgetForm.month}`, budgetForm.amount)
       showBudgetDialog.value = false
-      // 重新加载仪表盘，更新剩余预算
       loadDashboard()
     } else {
       ElMessage.error(res.data.msg)
@@ -138,16 +128,16 @@ const submitBudget = async () => {
   }
 }
 
-const searchRecords = () => {
-  if (searchKeyword.value.trim()) {
-    router.push({ path: '/records', query: { keyword: searchKeyword.value.trim() } })
+const handleSearch = () => {
+  const keyword = searchKeyword.value.trim()
+  if (keyword) {
+    router.push({ path: '/records', query: { keyword } })
   } else {
     router.push('/records')
   }
 }
 
 onMounted(() => {
-  // 从 localStorage 恢复预算额度（如果之前设置过）
   const month = new Date().toISOString().slice(0, 7)
   const savedAmount = localStorage.getItem(`budget_${month}`)
   if (savedAmount) {
@@ -158,10 +148,7 @@ onMounted(() => {
 </script>
 
 <style scoped>
-.amount {
-  font-size: 28px;
-  font-weight: bold;
-}
+.amount { font-size: 28px; font-weight: bold; }
 .income { color: #67C23A; }
 .expense { color: #F56C6C; }
 .normal { color: #409EFF; }
