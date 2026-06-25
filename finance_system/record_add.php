@@ -1,55 +1,93 @@
 <?php
-// 1. 开启 Session（一定要放在文件最开头）
 session_start();
 
 header('Content-Type: application/json; charset=utf-8');
-header('Access-Control-Allow-Origin: *'); 
-require 'db.php'; 
+header('Access-Control-Allow-Origin: http://localhost:5173');
+header('Access-Control-Allow-Credentials: true');
+header('Access-Control-Allow-Methods: POST, GET, OPTIONS');
+header('Access-Control-Allow-Headers: Content-Type');
 
-// 2. 【安全校验】直接从 Session 获取 user_id，杜绝前端伪造！
+// 处理 OPTIONS 预检请求
+if ($_SERVER['REQUEST_METHOD'] === 'OPTIONS') {
+    http_response_code(200);
+    exit();
+}
+
+require 'db.php';
+
+// 安全检查
 if (!isset($_SESSION['user_id'])) {
     echo json_encode(['code' => 401, 'msg' => '未登录或登录已过期，请先登录！']);
     exit;
 }
-// 从 Session 中拿走真实的用户 ID
+
 $user_id = intval($_SESSION['user_id']);
 
-// 接收前端传来的 JSON 数据
+// 接收前端数据
 $input = file_get_contents('php://input');
 $data = json_decode($input, true);
 if (!$data) {
     $data = $_POST;
 }
 
-// 3. 提取其他参数（不再需要提取 user_id 了）
 $category_id = isset($data['category_id']) ? intval($data['category_id']) : 0;
 $type = isset($data['type']) ? $data['type'] : '';
 $amount = isset($data['amount']) ? floatval($data['amount']) : 0;
 $note = isset($data['note']) ? $data['note'] : '';
-
-// 记账日期（精确到秒）
-$record_time = (isset($data['record_time']) && !empty($data['record_time'])) 
-               ? $data['record_time'] 
+$record_time = (isset($data['record_time']) && !empty($data['record_time']))
+               ? $data['record_time']
                : date('Y-m-d H:i:s');
 
-// 基础参数校验
 if ($category_id <= 0 || empty($type) || $amount <= 0) {
     echo json_encode(['code' => 400, 'msg' => '参数不完整或金额错误！']);
     exit;
 }
 
-// 准备 SQL 语句
+// 插入记录
 $sql = "INSERT INTO records (user_id, category_id, record_time, type, amount, note) VALUES (?, ?, ?, ?, ?, ?)";
 $stmt = $conn->prepare($sql);
 
 if ($stmt) {
     $stmt->bind_param("iissss", $user_id, $category_id, $record_time, $type, $amount, $note);
     if ($stmt->execute()) {
+        // ========== 新增：计算当月预算超支状态 ==========
+        $is_over_budget = false;
+        $remaining_budget = 0;
+
+        // 只有当这笔记录是支出时，才检查预算
+        if ($type === 'expense') {
+            $budget_month = date('Y-m', strtotime($record_time));
+
+            // 查询该用户当月的预算额度
+            $budget_sql = "SELECT amount FROM budgets WHERE user_id = $user_id AND budget_month = '$budget_month'";
+            $budget_result = mysqli_query($conn, $budget_sql);
+
+            if ($budget_result && mysqli_num_rows($budget_result) > 0) {
+                $budget_row = mysqli_fetch_assoc($budget_result);
+                $budget_amount = floatval($budget_row['amount']);
+
+                // 查询当月总支出（包含刚插入的这条）
+                $expense_sql = "SELECT SUM(amount) as total_expense FROM records 
+                                WHERE user_id = $user_id 
+                                AND type = 'expense' 
+                                AND DATE_FORMAT(record_time, '%Y-%m') = '$budget_month'";
+                $expense_result = mysqli_query($conn, $expense_sql);
+                $expense_row = mysqli_fetch_assoc($expense_result);
+                $total_expense = floatval($expense_row['total_expense']);
+
+                $remaining_budget = $budget_amount - $total_expense;
+                $is_over_budget = ($remaining_budget < 0);
+            }
+        }
+        // ========== 超支计算结束 ==========
+
         echo json_encode([
-            'code' => 200, 
+            'code' => 200,
             'msg' => '记账成功！',
             'data' => [
-                'record_time' => $record_time
+                'record_time' => $record_time,
+                'is_over_budget' => $is_over_budget,      // 新增
+                'remaining_budget' => $remaining_budget    // 新增
             ]
         ]);
     } else {

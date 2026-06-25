@@ -45,7 +45,7 @@
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
 import { apiAddRecord, apiGetCategories } from '@/api'
-import { ElMessage } from 'element-plus'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
 const router = useRouter()
 const submitting = ref(false)
@@ -93,10 +93,28 @@ const submitRecord = async () => {
       record_time: form.record_time || undefined
     })
     if (res.data.code === 200) {
-      ElMessage.success('记账成功！')
-      router.push('/records')
+      // 检查后端返回的超支标志
+      const { is_over_budget, remaining_budget } = res.data.data || {}
+      
+      if (is_over_budget) {
+        // 超支时弹出警告，用户确认后再跳转
+        ElMessageBox.alert(
+          `警告：本月预算已超支！当前剩余预算为 ¥${remaining_budget}`,
+          '超支提醒',
+          {
+            confirmButtonText: '我知道了',
+            type: 'warning'
+          }
+        ).then(() => {
+          router.push('/records')
+        })
+      } else {
+        // 未超支，正常提示并跳转
+        ElMessage.success('记账成功！')
+        router.push('/records')
+      }
     } else {
-      ElMessage.error(res.data.msg)
+      ElMessage.error(res.data.msg || '记账失败')
     }
   } catch (error) {
     ElMessage.error('提交失败，请稍后重试')

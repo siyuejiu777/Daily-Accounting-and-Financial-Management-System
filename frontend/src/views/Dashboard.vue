@@ -18,7 +18,7 @@
         <el-card>
           <template #header>
             月度预算剩余
-            <el-button type="text" @click="showBudgetDialog = true" style="float: right;">设置预算</el-button>
+            <el-button link @click="showBudgetDialog = true" style="float: right;">设置预算</el-button>
           </template>
           <div :class="['amount', isOverBudget ? 'over' : 'normal']">¥ {{ remainingBudget }}</div>
         </el-card>
@@ -73,22 +73,46 @@ const budgetForm = reactive({
   amount: 0
 })
 
+// 获取本地日期字符串 (YYYY-MM-DD)，修复 UTC 时区问题
+const getLocalDateString = () => {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}`
+}
+
+// 获取本地月份字符串 (YYYY-MM)
+const getLocalMonthString = () => {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  return `${year}-${month}`
+}
+
 const calcTotalExpense = (trendData) => {
   return trendData.reduce((sum, day) => sum + (day.expense || 0), 0)
 }
 
 const loadDashboard = async () => {
   try {
-    const month = new Date().toISOString().slice(0, 7)
+    const month = getLocalMonthString()
     const res = await apiGetAnalysis(month)
     if (res.data.code === 200) {
       const { daily_trend_line } = res.data.data
-      const todayStr = new Date().toISOString().slice(0, 10)
+      
+      // 使用本地日期字符串匹配
+      const todayStr = getLocalDateString()
       const todayData = daily_trend_line.find(item => item.date === todayStr)
+      
       if (todayData) {
         todayIncome.value = todayData.income || 0
         todayExpense.value = todayData.expense || 0
+      } else {
+        todayIncome.value = 0
+        todayExpense.value = 0
       }
+
       const totalExpense = calcTotalExpense(daily_trend_line)
       const savedBudget = parseFloat(localStorage.getItem(`budget_${month}`) || '0')
       if (savedBudget > 0) {
@@ -115,7 +139,8 @@ const submitBudget = async () => {
     const res = await apiSetBudget(budgetForm.month, budgetForm.amount)
     if (res.data.code === 200) {
       ElMessage.success(res.data.msg)
-      localStorage.setItem(`budget_${budgetForm.month}`, budgetForm.amount)
+      const month = getLocalMonthString()
+      localStorage.setItem(`budget_${month}`, budgetForm.amount)
       showBudgetDialog.value = false
       loadDashboard()
     } else {
@@ -138,7 +163,7 @@ const handleSearch = () => {
 }
 
 onMounted(() => {
-  const month = new Date().toISOString().slice(0, 7)
+  const month = getLocalMonthString()
   const savedAmount = localStorage.getItem(`budget_${month}`)
   if (savedAmount) {
     budgetForm.amount = parseFloat(savedAmount)
