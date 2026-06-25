@@ -17,7 +17,8 @@
       </el-table-column>
       <el-table-column label="操作">
         <template #default="{ row }">
-          <el-button size="small" @click="deleteCategory(row)">删除</el-button>
+          <el-button size="small" @click="viewRecords(row.category_id)">查看记录</el-button>
+          <el-button size="small" type="danger" @click="deleteCategory(row)">删除</el-button>
         </template>
       </el-table-column>
     </el-table>
@@ -50,11 +51,16 @@
 import { ref, onMounted } from 'vue'
 import { apiGetCategories, apiAddCategory, apiDeleteCategory } from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
-
+import { useRouter } from 'vue-router'
+const router = useRouter()
 const categories = ref([])
 const loading = ref(false)
 const dialogVisible = ref(false)
 const submitting = ref(false)
+
+const viewRecords = (categoryId) => {
+  router.push({ path: '/records', query: { category_id: categoryId } })
+}
 
 const form = ref({
   category_name: '',

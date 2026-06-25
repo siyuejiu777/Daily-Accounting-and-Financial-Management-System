@@ -16,23 +16,48 @@
       </el-col>
       <el-col :xs="24" :sm="8">
         <el-card>
-          <template #header>月度预算剩余</template>
+          <template #header>
+            月度预算剩余
+            <el-button type="text" @click="showBudgetDialog = true" style="float: right;">设置预算</el-button>
+          </template>
           <div :class="['amount', isOverBudget ? 'over' : 'normal']">¥ {{ remainingBudget }}</div>
         </el-card>
       </el-col>
     </el-row>
+
     <el-card style="margin-top: 20px;">
       <template #header>快速记账</template>
-      <el-input v-model="searchKeyword" placeholder="搜索记账记录..." />
+      <el-input v-model="searchKeyword" placeholder="搜索记账记录..." @keyup.enter="searchRecords">
+        <template #append>
+          <el-button @click="searchRecords">搜索</el-button>
+        </template>
+      </el-input>
       <el-button type="primary" style="margin-top: 10px;" @click="router.push('/record')">添加新记录</el-button>
     </el-card>
+
+    <!-- 设置预算弹窗 -->
+    <el-dialog v-model="showBudgetDialog" title="设置月度预算" width="400px">
+      <el-form :model="budgetForm" label-width="80px">
+        <el-form-item label="月份">
+          <el-input v-model="budgetForm.month" placeholder="YYYY-MM" disabled />
+        </el-form-item>
+        <el-form-item label="预算额度">
+          <el-input-number v-model="budgetForm.amount" :min="0" :precision="2" style="width: 100%" />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showBudgetDialog = false">取消</el-button>
+        <el-button type="primary" @click="submitBudget" :loading="budgetSubmitting">保存</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-import { ref, onMounted } from 'vue'
+import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { apiGetAnalysis } from '@/api'
+import { apiGetAnalysis, apiSetBudget } from '@/api'
+import { ElMessage } from 'element-plus'
 
 const router = useRouter()
 const todayIncome = ref(0)
@@ -41,36 +66,94 @@ const remainingBudget = ref(0)
 const isOverBudget = ref(false)
 const searchKeyword = ref('')
 
-onMounted(async () => {
+// 预算弹窗相关
+const showBudgetDialog = ref(false)
+const budgetSubmitting = ref(false)
+const budgetForm = reactive({
+  month: new Date().toISOString().slice(0, 7), // 当月
+  amount: 0
+})
+
+// 计算当月总支出（从 daily_trend_line 累加）
+const calcTotalExpense = (trendData) => {
+  return trendData.reduce((sum, day) => sum + (day.expense || 0), 0)
+}
+
+// 加载仪表盘数据
+const loadDashboard = async () => {
   try {
-    // 获取当月数据
-    const month = new Date().toISOString().slice(0, 7) // 格式：YYYY-MM
+    const month = new Date().toISOString().slice(0, 7)
     const res = await apiGetAnalysis(month)
     if (res.data.code === 200) {
-      const { daily_trend_line, category_expense_pie } = res.data.data
+      const { daily_trend_line } = res.data.data
 
       // 提取今日收支
-      const todayStr = new Date().toISOString().slice(0, 10) // YYYY-MM-DD
+      const todayStr = new Date().toISOString().slice(0, 10)
       const todayData = daily_trend_line.find(item => item.date === todayStr)
       if (todayData) {
         todayIncome.value = todayData.income || 0
         todayExpense.value = todayData.expense || 0
       }
 
-      // 如果后端 analysis.php 还返回了预算相关字段（如 remaining_budget, is_over_budget），直接取用
-      // 假设返回的数据里包含：
-      if (res.data.data.remaining_budget !== undefined) {
-        remainingBudget.value = res.data.data.remaining_budget
-        isOverBudget.value = res.data.data.is_over_budget || false
+      // 计算当月总支出和预算剩余
+      const totalExpense = calcTotalExpense(daily_trend_line)
+      const savedBudget = parseFloat(localStorage.getItem(`budget_${month}`) || '0')
+      if (savedBudget > 0) {
+        const remaining = savedBudget - totalExpense
+        remainingBudget.value = remaining
+        isOverBudget.value = remaining < 0
       } else {
-        // 如果不包含，就调用 budget_set.php（GET 或 POST）来获取
-        // 这里先留空，或直接设为0
         remainingBudget.value = 0
+        isOverBudget.value = false
       }
     }
   } catch (error) {
     console.error('获取仪表盘数据失败:', error)
   }
+}
+
+// 提交预算
+const submitBudget = async () => {
+  if (budgetForm.amount <= 0) {
+    ElMessage.warning('预算额度必须大于0')
+    return
+  }
+  budgetSubmitting.value = true
+  try {
+    const res = await apiSetBudget(budgetForm.month, budgetForm.amount)
+    if (res.data.code === 200) {
+      ElMessage.success(res.data.msg)
+      // 存入 localStorage 作为缓存
+      localStorage.setItem(`budget_${budgetForm.month}`, budgetForm.amount)
+      showBudgetDialog.value = false
+      // 重新加载仪表盘，更新剩余预算
+      loadDashboard()
+    } else {
+      ElMessage.error(res.data.msg)
+    }
+  } catch (error) {
+    ElMessage.error('设置预算失败，请稍后重试')
+  } finally {
+    budgetSubmitting.value = false
+  }
+}
+
+const searchRecords = () => {
+  if (searchKeyword.value.trim()) {
+    router.push({ path: '/records', query: { keyword: searchKeyword.value.trim() } })
+  } else {
+    router.push('/records')
+  }
+}
+
+onMounted(() => {
+  // 从 localStorage 恢复预算额度（如果之前设置过）
+  const month = new Date().toISOString().slice(0, 7)
+  const savedAmount = localStorage.getItem(`budget_${month}`)
+  if (savedAmount) {
+    budgetForm.amount = parseFloat(savedAmount)
+  }
+  loadDashboard()
 })
 </script>
 

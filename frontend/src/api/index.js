@@ -48,3 +48,9 @@ export const apiAddCategory = (data) => {
 export const apiDeleteCategory = (categoryId) => {
   return request.post('category_delete.php', { category_id: categoryId })
 }
+
+// 更新记录
+export const apiUpdateRecord = (data) => {
+  return request.post('record_update.php', data)
+  // data: { category_id, old_record_time, amount, type, note, record_time }
+}

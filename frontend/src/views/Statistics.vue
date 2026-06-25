@@ -1,6 +1,17 @@
 <template>
   <div>
     <h2>收支统计分析</h2>
+    <div style="margin-bottom: 20px; display: flex; align-items: center;">
+      <span style="margin-right: 10px;">选择月份：</span>
+      <el-date-picker
+        v-model="currentMonth"
+        type="month"
+        placeholder="选择月份"
+        format="YYYY-MM"
+        value-format="YYYY-MM"
+        @change="loadAnalysis"
+      />
+    </div>
     <el-row :gutter="20">
       <el-col :xs="24" :sm="12">
         <el-card>
@@ -34,24 +45,23 @@ import { apiGetAnalysis, apiGetCategories } from '@/api'
 const expensePieChart = ref(null)
 const incomePieChart = ref(null)
 const lineChart = ref(null)
+const currentMonth = ref(new Date().toISOString().slice(0, 7))
 
-onMounted(async () => {
-  const month = new Date().toISOString().slice(0, 7)
-
+const loadAnalysis = async () => {
+  const month = currentMonth.value
   try {
-    // 并发请求分析数据和分类列表
     const [analysisRes, categoriesRes] = await Promise.all([
       apiGetAnalysis(month),
-      apiGetCategories().catch(() => ({ data: { code: 200, data: [] } })) // 容错
+      apiGetCategories().catch(() => ({ data: { code: 200, data: [] } }))
     ])
 
     if (analysisRes.data.code === 200) {
       const { category_expense_pie, daily_trend_line, record_list } = analysisRes.data.data
 
-      // 1. 渲染后端返回的支出分类饼图
+      // 渲染支出饼图
       renderPieChart(expensePieChart, category_expense_pie || [], '支出')
 
-      // 2. 根据 record_list 计算收入分类占比
+      // 计算收入分类占比
       const categories = categoriesRes.data.code === 200 ? categoriesRes.data.data : []
       const categoryMap = {}
       categories.forEach(cat => {
@@ -71,15 +81,14 @@ onMounted(async () => {
       }))
       renderPieChart(incomePieChart, incomePieData, '收入')
 
-      // 3. 渲染每日收支趋势折线图
+      // 渲染趋势图
       renderLineChart(daily_trend_line || [])
     }
   } catch (error) {
     console.error('获取统计数据失败', error)
   }
-})
+}
 
-// 通用饼图渲染函数
 const renderPieChart = (chartRef, data, type) => {
   if (!chartRef.value) return
   const chart = echarts.init(chartRef.value)
@@ -121,4 +130,8 @@ const renderLineChart = (data) => {
     ]
   })
 }
+
+onMounted(() => {
+  loadAnalysis()
+})
 </script>
