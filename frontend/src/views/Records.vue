@@ -12,7 +12,17 @@
         @change="fetchRecords"
       />
     </div>
-    <el-table :data="records" border v-loading="loading">
+    <el-alert
+      v-if="searchKeyword"
+      title="搜索结果"
+      :description="`正在按 “${searchKeyword}” 筛选，共找到 ${filteredRecords.length} 条记录`"
+      type="info"
+      closable
+      @close="searchKeyword = ''"
+      style="margin-bottom: 20px;"
+    />
+
+    <el-table :data="filteredRecords" border v-loading="loading">
       <el-table-column prop="amount" label="金额" />
       <el-table-column prop="type" label="类型">
         <template #default="{ row }">
@@ -31,7 +41,7 @@
         </template>
       </el-table-column>
     </el-table>
-    <el-empty v-if="!loading && records.length === 0" description="暂无记录" />
+    <el-empty v-if="!loading && filteredRecords.length === 0" description="暂无记录" />
 
     <!-- 编辑记录弹窗 -->
     <el-dialog v-model="editDialogVisible" title="编辑记录" width="500px">
@@ -77,15 +87,17 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, watch } from 'vue'
+import { useRoute } from 'vue-router'
 import { apiGetAnalysis, apiDeleteRecord, apiUpdateRecord, apiGetCategories } from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
 
 const records = ref([])
 const loading = ref(false)
 const currentMonth = ref(new Date().toISOString().slice(0, 7))
+const route = useRoute()
+const searchKeyword = ref('')
 
-// 编辑弹窗相关
 const editDialogVisible = ref(false)
 const editSubmitting = ref(false)
 const categories = ref([])
@@ -98,6 +110,19 @@ const editForm = reactive({
   note: ''
 })
 
+const filteredRecords = computed(() => {
+  if (!searchKeyword.value) return records.value
+  const keyword = searchKeyword.value.toLowerCase()
+  return records.value.filter(record => {
+    return (
+      (record.note && record.note.toLowerCase().includes(keyword)) ||
+      (record.category_name && record.category_name.toLowerCase().includes(keyword)) ||
+      (record.amount && record.amount.toString().includes(keyword)) ||
+      (record.type && record.type.includes(keyword))
+    )
+  })
+})
+
 const filteredEditCategories = computed(() => {
   return categories.value.filter(cat => cat.type === editForm.type)
 })
@@ -105,7 +130,7 @@ const filteredEditCategories = computed(() => {
 const fetchRecords = async () => {
   loading.value = true
   try {
-    const res = await apiGetAnalysis(currentMonth.value)  // 之前是固定月份
+    const res = await apiGetAnalysis(currentMonth.value)
     if (res.data.code === 200) {
       records.value = res.data.data.record_list || []
     }
@@ -115,6 +140,10 @@ const fetchRecords = async () => {
     loading.value = false
   }
 }
+
+watch(() => route.query.keyword, (newKeyword) => {
+  searchKeyword.value = newKeyword || ''
+}, { immediate: true })
 
 const loadCategories = async () => {
   try {
