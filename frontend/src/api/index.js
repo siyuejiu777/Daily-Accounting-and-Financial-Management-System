@@ -54,3 +54,7 @@ export const apiUpdateRecord = (data) => {
   return request.post('record_update.php', data)
   // data: { category_id, old_record_time, amount, type, note, record_time }
 }
+
+export const apiGetBudgetStatus = (month) => {
+  return request.get('budget_status.php', { params: { month } })
+}

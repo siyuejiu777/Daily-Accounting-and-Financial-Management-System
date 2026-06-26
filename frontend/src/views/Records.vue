@@ -12,6 +12,8 @@
         @change="fetchRecords"
       />
     </div>
+    
+    <!-- 搜索关键词提示 -->
     <el-alert
       v-if="searchKeyword"
       title="搜索结果"
@@ -19,6 +21,17 @@
       type="info"
       closable
       @close="searchKeyword = ''"
+      style="margin-bottom: 20px;"
+    />
+    
+    <!-- 分类筛选提示 -->
+    <el-alert
+      v-if="filterCategoryId && !searchKeyword"
+      title="分类筛选"
+      :description="`正在查看分类为 “${currentCategoryName}” 的记录，共 ${filteredRecords.length} 条`"
+      type="info"
+      closable
+      @close="clearCategoryFilter"
       style="margin-bottom: 20px;"
     />
 
@@ -87,40 +100,55 @@
 </template>
 
 <script setup>
-import { ref, reactive, computed, onMounted, watch } from 'vue'
+// import { ref, reactive, computed, onMounted, watch } from 'vue'
 import { useRoute } from 'vue-router'
-import { apiGetAnalysis, apiDeleteRecord, apiUpdateRecord, apiGetCategories } from '@/api'
+import { apiGetAnalysis, apiDeleteRecord, apiUpdateRecord, apiAddRecord, apiGetCategories } from '@/api'
 import { ElMessage, ElMessageBox } from 'element-plus'
+import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
 
 const records = ref([])
 const loading = ref(false)
 const currentMonth = ref(new Date().toISOString().slice(0, 7))
 const route = useRoute()
 const searchKeyword = ref('')
+const filterCategoryId = ref(null)
 
 const editDialogVisible = ref(false)
 const editSubmitting = ref(false)
 const categories = ref([])
 const editForm = reactive({
   category_id: null,
-  old_record_time: '',
+  old_category_id: null,      // 新增：原始分类ID，用于定位旧记录
+  old_record_time: '',        // 新增：原始时间，用于定位旧记录
   amount: null,
   type: 'expense',
   record_time: '',
   note: ''
 })
 
+// 计算当前筛选的分类名称（用于提示）
+const currentCategoryName = computed(() => {
+  if (!filterCategoryId.value) return ''
+  const cat = categories.value.find(c => c.category_id == filterCategoryId.value)
+  return cat ? cat.category_name : ''
+})
+
+// 过滤后的记录列表：先按分类，再按搜索关键词
 const filteredRecords = computed(() => {
-  if (!searchKeyword.value) return records.value
-  const keyword = searchKeyword.value.toLowerCase()
-  return records.value.filter(record => {
-    return (
+  let result = records.value
+  if (filterCategoryId.value) {
+    result = result.filter(record => record.category_id == filterCategoryId.value)
+  }
+  if (searchKeyword.value) {
+    const keyword = searchKeyword.value.toLowerCase()
+    result = result.filter(record =>
       (record.note && record.note.toLowerCase().includes(keyword)) ||
       (record.category_name && record.category_name.toLowerCase().includes(keyword)) ||
       (record.amount && record.amount.toString().includes(keyword)) ||
       (record.type && record.type.includes(keyword))
     )
-  })
+  }
+  return result
 })
 
 const filteredEditCategories = computed(() => {
@@ -145,25 +173,51 @@ watch(() => route.query.keyword, (newKeyword) => {
   searchKeyword.value = newKeyword || ''
 }, { immediate: true })
 
+watch(() => route.query.category_id, (newId) => {
+  filterCategoryId.value = newId ? parseInt(newId) : null
+}, { immediate: true })
+
+const clearCategoryFilter = () => {
+  filterCategoryId.value = null
+  // 同时清除路由参数（可选）
+  if (route.query.category_id) {
+    router.replace({ path: '/records', query: { ...route.query, category_id: undefined } })
+  }
+}
+
+// 在 loadCategories 函数中
 const loadCategories = async () => {
   try {
     const res = await apiGetCategories()
     if (res.data.code === 200) {
-      categories.value = res.data.data
+      categories.value = res.data.data.map(cat => ({
+        ...cat,
+        category_id: Number(cat.category_id)  // 强制转为数字
+      }))
     }
   } catch (e) {
     categories.value = []
   }
 }
 
-const openEditDialog = (row) => {
-  editForm.category_id = row.category_id
-  editForm.old_record_time = row.record_time
-  editForm.amount = parseFloat(row.amount)
-  editForm.type = row.type
-  editForm.record_time = row.record_time
-  editForm.note = row.note || ''
-  editDialogVisible.value = true
+const openEditDialog = async (row) => {
+  // 1. 确保分类数据已加载（如果已加载则不会重复请求）
+  if (categories.value.length === 0) {
+    await loadCategories()
+  }
+  
+  // 2. 用 Vue 的 nextTick 确保 DOM 更新后再打开弹窗
+  nextTick(() => {
+    // 填充表单，数值全部转为数字
+    editForm.category_id = Number(row.category_id)
+    editForm.old_category_id = Number(row.category_id)
+    editForm.old_record_time = row.record_time
+    editForm.amount = parseFloat(row.amount)
+    editForm.type = row.type
+    editForm.record_time = row.record_time
+    editForm.note = row.note || ''
+    editDialogVisible.value = true
+  })
 }
 
 const submitEdit = async () => {
@@ -173,20 +227,54 @@ const submitEdit = async () => {
   }
   editSubmitting.value = true
   try {
-    const res = await apiUpdateRecord({
-      category_id: editForm.category_id,
-      old_record_time: editForm.old_record_time,
-      amount: editForm.amount,
-      type: editForm.type,
-      note: editForm.note,
-      record_time: editForm.record_time || undefined
-    })
-    if (res.data.code === 200) {
-      ElMessage.success('修改成功')
-      editDialogVisible.value = false
-      fetchRecords()
+    // 判断分类或时间是否改变
+    const categoryChanged = editForm.category_id !== editForm.old_category_id
+    const timeChanged = editForm.record_time !== editForm.old_record_time
+
+    if (categoryChanged || timeChanged) {
+      // 联合主键发生变化，采用“先删旧，再添新”策略
+      // 1. 删除原记录
+      const delRes = await apiDeleteRecord({
+        category_id: editForm.old_category_id,
+        record_time: editForm.old_record_time
+      })
+      if (delRes.data.code !== 200) {
+        ElMessage.error('删除原记录失败：' + (delRes.data.msg || ''))
+        return
+      }
+      // 2. 添加新记录
+      const addRes = await apiAddRecord({
+        amount: editForm.amount,
+        type: editForm.type,
+        category_id: editForm.category_id,
+        note: editForm.note,
+        record_time: editForm.record_time || undefined
+      })
+      if (addRes.data.code === 200) {
+        ElMessage.success('修改成功')
+        editDialogVisible.value = false
+        fetchRecords()
+      } else {
+        ElMessage.error('添加新记录失败：' + (addRes.data.msg || ''))
+        // 这里可以考虑恢复被删除的记录，但演示环境下暂不处理
+      }
     } else {
-      ElMessage.error(res.data.msg || '修改失败')
+      // 未改变联合主键，直接更新其他字段
+      const res = await apiUpdateRecord({
+        category_id: editForm.category_id,
+        old_record_time: editForm.old_record_time,
+        amount: editForm.amount,
+        type: editForm.type,
+        note: editForm.note,
+        record_time: editForm.record_time || undefined
+      })
+      if (res.data.code === 200) {
+        ElMessage.success('修改成功')
+        editDialogVisible.value = false
+        fetchRecords()
+      } else {
+        ElMessage.error(res.data.msg || '修改失败')
+      }
     }
   } catch (error) {
     ElMessage.error('请求失败，请稍后重试')

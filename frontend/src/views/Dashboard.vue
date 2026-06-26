@@ -56,7 +56,7 @@
 <script setup>
 import { ref, reactive, onMounted } from 'vue'
 import { useRouter } from 'vue-router'
-import { apiGetAnalysis, apiSetBudget } from '@/api'
+import { apiGetAnalysis, apiSetBudget, apiGetBudgetStatus } from '@/api'
 import { ElMessage } from 'element-plus'
 
 const router = useRouter()
@@ -73,7 +73,6 @@ const budgetForm = reactive({
   amount: 0
 })
 
-// 获取本地日期字符串 (YYYY-MM-DD)，修复 UTC 时区问题
 const getLocalDateString = () => {
   const now = new Date()
   const year = now.getFullYear()
@@ -82,7 +81,6 @@ const getLocalDateString = () => {
   return `${year}-${month}-${day}`
 }
 
-// 获取本地月份字符串 (YYYY-MM)
 const getLocalMonthString = () => {
   const now = new Date()
   const year = now.getFullYear()
@@ -90,8 +88,21 @@ const getLocalMonthString = () => {
   return `${year}-${month}`
 }
 
-const calcTotalExpense = (trendData) => {
-  return trendData.reduce((sum, day) => sum + (day.expense || 0), 0)
+const loadBudget = async () => {
+  try {
+    const month = getLocalMonthString()
+    const res = await apiGetBudgetStatus(month)
+    if (res.data.code === 200) {
+      const { remaining_budget, is_over_budget, budget_amount } = res.data.data
+      remainingBudget.value = remaining_budget
+      isOverBudget.value = is_over_budget
+      // 将预算额度同步到弹窗表单中，方便修改
+      budgetForm.amount = budget_amount
+      budgetForm.month = month
+    }
+  } catch (error) {
+    console.error('获取预算状态失败:', error)
+  }
 }
 
 const loadDashboard = async () => {
@@ -100,28 +111,14 @@ const loadDashboard = async () => {
     const res = await apiGetAnalysis(month)
     if (res.data.code === 200) {
       const { daily_trend_line } = res.data.data
-      
-      // 使用本地日期字符串匹配
       const todayStr = getLocalDateString()
       const todayData = daily_trend_line.find(item => item.date === todayStr)
-      
       if (todayData) {
         todayIncome.value = todayData.income || 0
         todayExpense.value = todayData.expense || 0
       } else {
         todayIncome.value = 0
         todayExpense.value = 0
-      }
-
-      const totalExpense = calcTotalExpense(daily_trend_line)
-      const savedBudget = parseFloat(localStorage.getItem(`budget_${month}`) || '0')
-      if (savedBudget > 0) {
-        const remaining = savedBudget - totalExpense
-        remainingBudget.value = remaining
-        isOverBudget.value = remaining < 0
-      } else {
-        remainingBudget.value = 0
-        isOverBudget.value = false
       }
     }
   } catch (error) {
@@ -139,10 +136,9 @@ const submitBudget = async () => {
     const res = await apiSetBudget(budgetForm.month, budgetForm.amount)
     if (res.data.code === 200) {
       ElMessage.success(res.data.msg)
-      const month = getLocalMonthString()
-      localStorage.setItem(`budget_${month}`, budgetForm.amount)
       showBudgetDialog.value = false
-      loadDashboard()
+      // 重新获取预算状态（更新剩余预算）
+      await loadBudget()
     } else {
       ElMessage.error(res.data.msg)
     }
@@ -162,13 +158,9 @@ const handleSearch = () => {
   }
 }
 
-onMounted(() => {
-  const month = getLocalMonthString()
-  const savedAmount = localStorage.getItem(`budget_${month}`)
-  if (savedAmount) {
-    budgetForm.amount = parseFloat(savedAmount)
-  }
-  loadDashboard()
+onMounted(async () => {
+  await loadBudget()      // 先加载预算，获取余额和超支状态
+  await loadDashboard()   // 再加载今日收支
 })
 </script>
 
