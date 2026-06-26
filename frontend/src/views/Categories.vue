@@ -1,12 +1,27 @@
 <template>
   <div>
     <h2>收支分类管理</h2>
-    <el-button type="primary" style="margin-bottom: 20px;" @click="openAddDialog">
-      新增分类
-    </el-button>
+    <div style="margin-bottom: 20px; display: flex; gap: 10px; align-items: center;">
+      <el-button type="primary" @click="openAddDialog">新增分类</el-button>
+      <el-button type="danger" :disabled="selectedIds.length === 0" @click="handleBatchDelete">
+        批量删除 ({{ selectedIds.length }})
+      </el-button>
+      <el-button type="warning" :disabled="selectedIds.length === 0" @click="showBatchTypeDialog = true">
+        批量修改类型 ({{ selectedIds.length }})
+      </el-button>
+      <span v-if="selectedIds.length > 0" style="color: #666;">
+        已选择 {{ selectedIds.length }} 个分类
+      </span>
+    </div>
 
-    <!-- 分类列表表格 -->
-    <el-table :data="categories" border v-loading="loading">
+    <el-table
+      :data="categories"
+      border
+      v-loading="loading"
+      @selection-change="handleSelectionChange"
+      ref="tableRef"
+    >
+      <el-table-column type="selection" width="55" />
       <el-table-column prop="category_name" label="分类名称" />
       <el-table-column prop="type" label="类型">
         <template #default="{ row }">
@@ -23,10 +38,9 @@
       </el-table-column>
     </el-table>
 
-    <!-- 空状态 -->
     <el-empty v-if="!loading && categories.length === 0" description="暂无分类数据" />
 
-    <!-- 新增分类弹窗 -->
+    <!-- 新增分类弹窗（原有） -->
     <el-dialog v-model="dialogVisible" title="新增分类" width="400px">
       <el-form :model="form" label-width="80px">
         <el-form-item label="分类名称">
@@ -44,30 +58,60 @@
         <el-button type="primary" @click="submitAddCategory" :loading="submitting">确定</el-button>
       </template>
     </el-dialog>
+
+    <!-- 批量修改类型弹窗（新增） -->
+    <el-dialog v-model="showBatchTypeDialog" title="批量修改分类类型" width="400px">
+      <p style="margin-bottom: 15px;">将选中的 {{ selectedIds.length }} 个分类的类型修改为：</p>
+      <el-radio-group v-model="batchNewType">
+        <el-radio value="expense">支出</el-radio>
+        <el-radio value="income">收入</el-radio>
+      </el-radio-group>
+      <template #footer>
+        <el-button @click="showBatchTypeDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleBatchUpdateType" :loading="batchSubmitting">确认修改</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
 import { ref, onMounted } from 'vue'
-import { apiGetCategories, apiAddCategory, apiDeleteCategory } from '@/api'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import { useRouter } from 'vue-router'
+import {
+  apiGetCategories, apiAddCategory, apiDeleteCategory,
+  apiBatchDeleteCategories, apiBatchUpdateCategoryType
+} from '@/api'
+import { ElMessage, ElMessageBox } from 'element-plus'
+
 const router = useRouter()
 const categories = ref([])
 const loading = ref(false)
 const dialogVisible = ref(false)
 const submitting = ref(false)
+const tableRef = ref(null)
 
+// 批量操作相关
+const selectedIds = ref([])          // 存储选中的 category_id
+const showBatchTypeDialog = ref(false)
+const batchNewType = ref('expense')
+const batchSubmitting = ref(false)
+
+const form = ref({
+  category_name: '',
+  type: 'expense'
+})
+
+// 表格复选框变化
+const handleSelectionChange = (selection) => {
+  selectedIds.value = selection.map(item => item.category_id)
+}
+
+// 跳转查看记录
 const viewRecords = (categoryId) => {
   router.push({ path: '/records', query: { category_id: categoryId } })
 }
 
-const form = ref({
-  category_name: '',
-  type: 'expense'  // 默认支出
-})
-
-// 打开新增弹窗，并重置表单
+// 打开新增弹窗
 const openAddDialog = () => {
   form.value = { category_name: '', type: 'expense' }
   dialogVisible.value = true
@@ -79,7 +123,10 @@ const fetchCategories = async () => {
   try {
     const res = await apiGetCategories()
     if (res.data.code === 200) {
-      categories.value = res.data.data
+      categories.value = res.data.data.map(cat => ({
+        ...cat,
+        category_id: Number(cat.category_id) // 确保数字类型
+      }))
     } else {
       ElMessage.error(res.data.msg || '获取分类失败')
     }
@@ -90,7 +137,7 @@ const fetchCategories = async () => {
   }
 }
 
-// 提交新增分类
+// 新增分类
 const submitAddCategory = async () => {
   if (!form.value.category_name) {
     ElMessage.warning('请输入分类名称')
@@ -105,7 +152,7 @@ const submitAddCategory = async () => {
     if (res.data.code === 200) {
       ElMessage.success('新增分类成功')
       dialogVisible.value = false
-      fetchCategories() // 刷新列表
+      fetchCategories()
     } else {
       ElMessage.error(res.data.msg || '新增失败')
     }
@@ -116,7 +163,7 @@ const submitAddCategory = async () => {
   }
 }
 
-// 删除分类
+// 单条删除（原有）
 const deleteCategory = async (row) => {
   try {
     await ElMessageBox.confirm(`确定删除分类“${row.category_name}”吗？`, '提示', {
@@ -132,10 +179,61 @@ const deleteCategory = async (row) => {
       ElMessage.error(res.data.msg || '删除失败')
     }
   } catch (error) {
-    // 取消删除或请求错误
     if (error !== 'cancel') {
       ElMessage.error('删除失败，网络异常')
     }
+  }
+}
+
+// 批量删除
+const handleBatchDelete = async () => {
+  if (selectedIds.value.length === 0) {
+    ElMessage.warning('请先选择分类')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定要删除选中的 ${selectedIds.value.length} 个分类吗？注意：如果分类下已有账目则无法删除。`,
+      '批量删除确认',
+      { confirmButtonText: '确定', cancelButtonText: '取消', type: 'warning' }
+    )
+    const res = await apiBatchDeleteCategories(selectedIds.value)
+    if (res.data.code === 200) {
+      ElMessage.success(res.data.msg)
+      fetchCategories()
+      // 清除选中状态
+      if (tableRef.value) tableRef.value.clearSelection()
+    } else {
+      ElMessage.error(res.data.msg)
+    }
+  } catch (error) {
+    if (error !== 'cancel') {
+      ElMessage.error('批量删除失败')
+    }
+  }
+}
+
+// 批量修改类型
+const handleBatchUpdateType = async () => {
+  if (selectedIds.value.length === 0) {
+    ElMessage.warning('请先选择分类')
+    return
+  }
+  batchSubmitting.value = true
+  try {
+    const res = await apiBatchUpdateCategoryType(selectedIds.value, batchNewType.value)
+    if (res.data.code === 200) {
+      ElMessage.success(res.data.msg)
+      showBatchTypeDialog.value = false
+      fetchCategories()
+      if (tableRef.value) tableRef.value.clearSelection()
+    } else {
+      ElMessage.error(res.data.msg)
+    }
+  } catch (error) {
+    ElMessage.error('批量修改失败')
+  } finally {
+    batchSubmitting.value = false
   }
 }
 

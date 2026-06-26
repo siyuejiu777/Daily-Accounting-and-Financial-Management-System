@@ -58,3 +58,26 @@ export const apiUpdateRecord = (data) => {
 export const apiGetBudgetStatus = (month) => {
   return request.get('budget_status.php', { params: { month } })
 }
+
+// 批量删除记录
+export const apiBatchDeleteRecords = (records) => {
+  return request.post('record_batch_delete.php', { records })
+  // records: [{category_id, record_time}, ...]
+}
+
+// 批量修改记录分类
+export const apiBatchUpdateCategory = (records, new_category_id) => {
+  return request.post('record_batch_update.php', { records, new_category_id })
+  // records: [{category_id, record_time}, ...], new_category_id: 目标分类ID
+}
+
+// 批量删除分类
+export const apiBatchDeleteCategories = (ids) => {
+  return request.post('category_batch_delete.php', { ids })
+}
+
+// 批量修改分类类型
+export const apiBatchUpdateCategoryType = (ids, type) => {
+  return request.post('category_batch_update.php', { ids, type })
+}
+

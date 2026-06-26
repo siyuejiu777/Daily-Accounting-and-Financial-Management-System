@@ -1,6 +1,8 @@
 <template>
   <div>
     <h2>记账列表</h2>
+    
+    <!-- 月份选择 -->
     <div style="margin-bottom: 20px; display: flex; align-items: center;">
       <span style="margin-right: 10px;">选择月份：</span>
       <el-date-picker
@@ -12,7 +14,28 @@
         @change="fetchRecords"
       />
     </div>
-    
+
+    <!-- 批量操作按钮栏 -->
+    <div style="margin-bottom: 15px; display: flex; align-items: center; gap: 10px;">
+      <el-button 
+        type="danger" 
+        :disabled="selectedRecords.length === 0" 
+        @click="handleBatchDelete"
+      >
+        批量删除 ({{ selectedRecords.length }})
+      </el-button>
+      <el-button 
+        type="primary" 
+        :disabled="selectedRecords.length === 0" 
+        @click="showBatchUpdateDialog = true"
+      >
+        批量修改分类 ({{ selectedRecords.length }})
+      </el-button>
+      <span v-if="selectedRecords.length > 0" style="color: #666;">
+        已选择 {{ selectedRecords.length }} 条记录
+      </span>
+    </div>
+
     <!-- 搜索关键词提示 -->
     <el-alert
       v-if="searchKeyword"
@@ -23,7 +46,7 @@
       @close="searchKeyword = ''"
       style="margin-bottom: 20px;"
     />
-    
+
     <!-- 分类筛选提示 -->
     <el-alert
       v-if="filterCategoryId && !searchKeyword"
@@ -35,7 +58,15 @@
       style="margin-bottom: 20px;"
     />
 
-    <el-table :data="filteredRecords" border v-loading="loading">
+    <!-- 记录表格 -->
+    <el-table 
+      :data="filteredRecords" 
+      border 
+      v-loading="loading"
+      @selection-change="handleSelectionChange"
+      ref="tableRef"
+    >
+      <el-table-column type="selection" width="55" />
       <el-table-column prop="amount" label="金额" />
       <el-table-column prop="type" label="类型">
         <template #default="{ row }">
@@ -56,6 +87,7 @@
     </el-table>
     <el-empty v-if="!loading && filteredRecords.length === 0" description="暂无记录" />
 
+    <!-- 编辑记录弹窗（原有） -->
     <!-- 编辑记录弹窗 -->
     <el-dialog v-model="editDialogVisible" title="编辑记录" width="500px">
       <el-form :model="editForm" label-width="80px">
@@ -96,44 +128,73 @@
         <el-button type="primary" @click="submitEdit" :loading="editSubmitting">保存修改</el-button>
       </template>
     </el-dialog>
+
+    <!-- 批量修改分类弹窗（新增） -->
+    <el-dialog v-model="showBatchUpdateDialog" title="批量修改分类" width="400px">
+      <p style="margin-bottom: 15px;">将选中的 {{ selectedRecords.length }} 条记录修改为：</p>
+      <el-select v-model="batchTargetCategoryId" placeholder="请选择目标分类" style="width: 100%">
+        <el-option
+          v-for="cat in categories"
+          :key="cat.category_id"
+          :label="cat.category_name + ' (' + (cat.type === 'expense' ? '支出' : '收入') + ')'"
+          :value="cat.category_id"
+        />
+      </el-select>
+      <template #footer>
+        <el-button @click="showBatchUpdateDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleBatchUpdate" :loading="batchSubmitting">确认修改</el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup>
-// import { ref, reactive, computed, onMounted, watch } from 'vue'
-import { useRoute } from 'vue-router'
-import { apiGetAnalysis, apiDeleteRecord, apiUpdateRecord, apiAddRecord, apiGetCategories } from '@/api'
-import { ElMessage, ElMessageBox } from 'element-plus'
 import { ref, reactive, computed, onMounted, watch, nextTick } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import {
+  apiGetAnalysis, apiDeleteRecord, apiUpdateRecord, apiAddRecord, apiGetCategories,
+  apiBatchDeleteRecords, apiBatchUpdateCategory
+} from '@/api'
+import { ElMessage, ElMessageBox } from 'element-plus'
 
+const router = useRouter()
+const route = useRoute()
+
+// ========== 列表数据与筛选 ==========
 const records = ref([])
 const loading = ref(false)
 const currentMonth = ref(new Date().toISOString().slice(0, 7))
-const route = useRoute()
 const searchKeyword = ref('')
 const filterCategoryId = ref(null)
+const categories = ref([])
 
+// ========== 批量操作 ==========
+const tableRef = ref(null)
+const selectedRecords = ref([])
+const showBatchUpdateDialog = ref(false)
+const batchTargetCategoryId = ref(null)
+const batchSubmitting = ref(false)
+
+// ========== 编辑弹窗 ==========
 const editDialogVisible = ref(false)
 const editSubmitting = ref(false)
-const categories = ref([])
 const editForm = reactive({
   category_id: null,
-  old_category_id: null,      // 新增：原始分类ID，用于定位旧记录
-  old_record_time: '',        // 新增：原始时间，用于定位旧记录
+  old_category_id: null,
+  old_record_time: '',
   amount: null,
   type: 'expense',
   record_time: '',
   note: ''
 })
 
-// 计算当前筛选的分类名称（用于提示）
+// ========== 计算属性 ==========
 const currentCategoryName = computed(() => {
   if (!filterCategoryId.value) return ''
   const cat = categories.value.find(c => c.category_id == filterCategoryId.value)
   return cat ? cat.category_name : ''
 })
 
-// 过滤后的记录列表：先按分类，再按搜索关键词
 const filteredRecords = computed(() => {
   let result = records.value
   if (filterCategoryId.value) {
@@ -155,6 +216,7 @@ const filteredEditCategories = computed(() => {
   return categories.value.filter(cat => cat.type === editForm.type)
 })
 
+// ========== 数据加载 ==========
 const fetchRecords = async () => {
   loading.value = true
   try {
@@ -169,30 +231,13 @@ const fetchRecords = async () => {
   }
 }
 
-watch(() => route.query.keyword, (newKeyword) => {
-  searchKeyword.value = newKeyword || ''
-}, { immediate: true })
-
-watch(() => route.query.category_id, (newId) => {
-  filterCategoryId.value = newId ? parseInt(newId) : null
-}, { immediate: true })
-
-const clearCategoryFilter = () => {
-  filterCategoryId.value = null
-  // 同时清除路由参数（可选）
-  if (route.query.category_id) {
-    router.replace({ path: '/records', query: { ...route.query, category_id: undefined } })
-  }
-}
-
-// 在 loadCategories 函数中
 const loadCategories = async () => {
   try {
     const res = await apiGetCategories()
     if (res.data.code === 200) {
       categories.value = res.data.data.map(cat => ({
         ...cat,
-        category_id: Number(cat.category_id)  // 强制转为数字
+        category_id: Number(cat.category_id)
       }))
     }
   } catch (e) {
@@ -200,15 +245,12 @@ const loadCategories = async () => {
   }
 }
 
+// ========== 单条编辑 ==========
 const openEditDialog = async (row) => {
-  // 1. 确保分类数据已加载（如果已加载则不会重复请求）
   if (categories.value.length === 0) {
     await loadCategories()
   }
-  
-  // 2. 用 Vue 的 nextTick 确保 DOM 更新后再打开弹窗
   nextTick(() => {
-    // 填充表单，数值全部转为数字
     editForm.category_id = Number(row.category_id)
     editForm.old_category_id = Number(row.category_id)
     editForm.old_record_time = row.record_time
@@ -227,13 +269,11 @@ const submitEdit = async () => {
   }
   editSubmitting.value = true
   try {
-    // 判断分类或时间是否改变
     const categoryChanged = editForm.category_id !== editForm.old_category_id
     const timeChanged = editForm.record_time !== editForm.old_record_time
 
     if (categoryChanged || timeChanged) {
-      // 联合主键发生变化，采用“先删旧，再添新”策略
-      // 1. 删除原记录
+      // 联合主键变化：先删旧记录，再添加新记录
       const delRes = await apiDeleteRecord({
         category_id: editForm.old_category_id,
         record_time: editForm.old_record_time
@@ -242,7 +282,6 @@ const submitEdit = async () => {
         ElMessage.error('删除原记录失败：' + (delRes.data.msg || ''))
         return
       }
-      // 2. 添加新记录
       const addRes = await apiAddRecord({
         amount: editForm.amount,
         type: editForm.type,
@@ -256,10 +295,9 @@ const submitEdit = async () => {
         fetchRecords()
       } else {
         ElMessage.error('添加新记录失败：' + (addRes.data.msg || ''))
-        // 这里可以考虑恢复被删除的记录，但演示环境下暂不处理
       }
     } else {
-      // 未改变联合主键，直接更新其他字段
+      // 直接更新
       const res = await apiUpdateRecord({
         category_id: editForm.category_id,
         old_record_time: editForm.old_record_time,
@@ -283,6 +321,7 @@ const submitEdit = async () => {
   }
 }
 
+// ========== 单条删除 ==========
 const deleteRecord = async (row) => {
   try {
     await ElMessageBox.confirm('确定删除该记录吗？', '提示', {
@@ -307,6 +346,84 @@ const deleteRecord = async (row) => {
   }
 }
 
+// ========== 批量操作 ==========
+const handleSelectionChange = (selection) => {
+  selectedRecords.value = selection
+}
+
+const handleBatchDelete = async () => {
+  if (selectedRecords.value.length === 0) {
+    ElMessage.warning('请先选择记录')
+    return
+  }
+  try {
+    await ElMessageBox.confirm(
+      `确定删除选中的 ${selectedRecords.value.length} 条记录吗？`,
+      '批量删除',
+      { type: 'warning' }
+    )
+    const recordsToDelete = selectedRecords.value.map(r => ({
+      category_id: r.category_id,
+      record_time: r.record_time
+    }))
+    const res = await apiBatchDeleteRecords(recordsToDelete)
+    if (res.data.code === 200) {
+      ElMessage.success(res.data.msg)
+      fetchRecords()
+      tableRef.value?.clearSelection()
+    } else {
+      ElMessage.error(res.data.msg)
+    }
+  } catch (error) {
+    if (error !== 'cancel') ElMessage.error('批量删除失败')
+  }
+}
+
+const handleBatchUpdate = async () => {
+  if (!batchTargetCategoryId.value) {
+    ElMessage.warning('请选择目标分类')
+    return
+  }
+  batchSubmitting.value = true
+  try {
+    const recordsToUpdate = selectedRecords.value.map(r => ({
+      category_id: r.category_id,
+      record_time: r.record_time
+    }))
+    const res = await apiBatchUpdateCategory(recordsToUpdate, batchTargetCategoryId.value)
+    if (res.data.code === 200) {
+      ElMessage.success(res.data.msg)
+      showBatchUpdateDialog.value = false
+      batchTargetCategoryId.value = null
+      fetchRecords()
+      tableRef.value?.clearSelection()
+    } else {
+      ElMessage.error(res.data.msg)
+    }
+  } catch (error) {
+    ElMessage.error('批量修改失败')
+  } finally {
+    batchSubmitting.value = false
+  }
+}
+
+const clearCategoryFilter = () => {
+  filterCategoryId.value = null
+  if (route.query.category_id) {
+    router.replace({ path: '/records', query: { ...route.query, category_id: undefined } })
+  }
+}
+
+// ========== 监听 ==========
+watch(() => route.query.keyword, (newKeyword) => {
+  searchKeyword.value = newKeyword || ''
+}, { immediate: true })
+
+watch(() => route.query.category_id, (newId) => {
+  filterCategoryId.value = newId ? parseInt(newId) : null
+}, { immediate: true })
+
+// ========== 初始化 ==========
 onMounted(() => {
   loadCategories()
   fetchRecords()
